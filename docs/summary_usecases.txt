@@ -1,351 +1,100 @@
-SAI-Challenger Use Cases - Simple Learning Guide
-================================================
+SAI-Challenger Virtual Use Cases (Ubuntu WSL, No Hardware)
+==========================================================
 
 Purpose
-- This file simplifies the main repo use-cases and architecture for your laptop lab.
-- It focuses only on what is practical without physical hardware.
-
-
-1) Simple Mental Model
-----------------------
-SAI-Challenger becomes easy when you break it into 4 choices:
-
-1. What is the DUT?
-- Virtual DUT
-- Physical DUT
-
-2. How do we configure the DUT?
-- Redis client
-- Thrift client
-
-3. How do we send traffic?
-- No traffic, API-only
-- PTF/Scapy software traffic
-- OTG/snappi traffic generator
-
-4. How is the runtime arranged?
-- Standalone mode
-- Client-server mode
-
-If you remember only one thing, remember this:
-- SAI-Challenger test logic stays mostly the same.
-- The testbed JSON chooses the backend details.
-
-
-2) One-Picture View
--------------------
-```mermaid
-flowchart TD
-    A[SAI-Challenger Test] --> B{Choose DUT}
-    B --> B1[Virtual DUT]
-    B --> B2[Physical DUT]
-
-    A --> C{Choose SAI Config API}
-    C --> C1[Redis]
-    C --> C2[Thrift]
-
-    A --> D{Choose Traffic Style}
-    D --> D1[API only / no traffic]
-    D --> D2[PTF/Scapy]
-    D --> D3[OTG/snappi]
-
-    A --> E{Choose Runtime Mode}
-    E --> E1[Standalone]
-    E --> E2[Client-Server]
-```
-
-
-3) What the Main Repo README Is Really Saying
----------------------------------------------
-The README lists many permutations because SAI-Challenger is flexible.
-
-In plain English:
-- You can test a virtual switch or a real switch.
-- You can configure it through Redis or Thrift.
-- You can test only API CRUD or include packet traffic.
-- You can run everything in one container or split client/server.
-
-That is why the project looks big.
-The core idea is still simple:
-- same test framework
-- different testbed choices
-
-
-4) Applicable Use Cases For Windows Laptops (RECOMMENDED ORDER)
-----------------------------------------------------------
-
-⭐ USE CASE A FIRST: Virtual SONiC DUT via QEMU (Windows-Proven)
-- **RECOMMENDED STARTING POINT for Windows**
-- Uses QEMU VM (SONiC OS) + Docker client
-- Port forwarding: SSH (2222) + Redis (6379)
-- Real SONiC behavior, not emulation
-- Reference: windows_sonic_vs_repro_setup.md
-- Example: Path A: QEMU SONiC VM + sainpu_sonic_vs testbed
-- Tests work reliably: test_vlan_create, test_l2_basic, etc.
-
-⚠️  USE CASE B ADVANCED: Virtual DUT with Local SAIVS (Linux-Only)
-- **NOT RECOMMENDED for Windows** - has fundamental issues:
-  - Requires veth network interfaces (problematic on Windows/WSL2)
-  - Dataplane tests hang or fail (FdbAttributeTest, L2 tests)
-  - Container networking between client/server is fragile on Windows
-- Use these only on Linux native or WSL2 with special setup
-- Path B1: SAIVS Thrift (limited, no dataplane)
-- Path B2: SAIVS with legacy PTF (dataplane issues)
-
-⌛ FUTURE: Once Path A is solid, Path B may be useful for:
-- Understanding standalone SAIVS architecture
-- Linux-specific development workflows
-- Advanced testing scenarios (on proper Linux)
-
-Three use-case details follow (for reference only):
-
-4A) Applicable Use Cases For Ubuntu/Linux (RECOMMENDED ORDER)
--------------------------------------------------------------
-
-USE CASE A FIRST: SAIVS Thrift API (B1)
-- Fastest way to validate SAI API CRUD basics.
-- Single runtime container in standalone mode.
-- Good first confidence check on Linux.
-
-USE CASE B SECOND: SAI-PTF Umbrella (B2)
-- Best way to learn legacy SAI-PTF integration.
-- Dataplane/veth behavior is usually stable on Ubuntu/Linux.
-- Good path for FdbAttributeTest and L2 packet scenarios.
-
-USE CASE C THIRD: SONiC DUT via QEMU (Path A)
-- Use when you want SONiC-specific behavior and Redis workflow.
-- Closer to production SONiC architecture.
-
-Recommended order for Ubuntu/Linux:
-1. Path B1 first
-2. Path B2 second
-3. Path A third
-
-
-5) Not Applicable Right Now
----------------------------
-These use-cases are not your priority because they need hardware or extra lab topology.
-
-- Physical DUT with software traffic generator
-- Physical DUT with hardware traffic generator
-- Fanout switch topologies
-- Self-contained physical DUT testbed concepts
-
-
-6) Best Learning Path For Windows (CORRECTED)
------------------------------
-```mermaid
-flowchart LR
-    A["Start on Windows"] --> F["Path A: QEMU SONiC VM"]
-    F --> G["Learn SONiC Redis behavior"]
-    G --> H["Run L2 tests with dataplane"]
-    H --> I["Dataplane tests pass ✅"]
-    I --> J["Optional: Path B for Linux env"]
-```
-
-Recommended order for Windows:
-1. Path A (QEMU SONiC) - proven stable
-2. Experiment with different testbeds
-3. Move to Linux if you need Path B scenarios
-
-OLD (INCORRECT) path order:
-1. ❌ Path B1 first - VETH ISSUES ON WINDOWS
-2. ❌ Path B2 second - DATAPLANE HANGS
-3. Path A third - CORRECT FINAL SETUP
-
-**LESSON LEARNED**: Veth-based dataplane tests fail on Windows due to WSL2 network limitations.
-
-6A) Best Learning Path For Ubuntu/Linux
----------------------------------------
-```mermaid
-flowchart LR
-  A[Start on Ubuntu Linux] --> B[Path B1: SAIVS API only]
-  B --> C[Learn SAI object CRUD]
-  C --> D[Path B2: SAI-PTF umbrella]
-  D --> E[Learn legacy PTF integration]
-  E --> F[Path A: QEMU SONiC Redis]
-  F --> G[Learn SONiC DUT behavior]
-```
-
-Recommended order for Ubuntu/Linux:
-1. Path B1 first
-2. Path B2 second
-3. Path A third
-
-
-7) Architecture Docs - What They Mean For You
-----------------------------------------------
-The architecture docs are useful, but they are easier when translated into simple language.
-
-Architecture overview
-- SAI-Challenger sits between the test and the DUT.
-- Test code uses a unified format.
-- Client adapter converts that format into Redis or Thrift calls.
-
-Simple picture:
-```mermaid
-flowchart LR
-    A[Test Case] --> B[Unified SAI commands]
-    B --> C{SAI Client Adapter}
-    C --> C1[Redis Client]
-    C --> C2[Thrift Client]
-    C1 --> D[DUT]
-    C2 --> D[DUT]
-```
-
-Why this matters:
-- Your test code does not need to change much when backend changes.
-- The testbed file decides whether Redis or Thrift is used.
-
-
-8) SAI Client Docs - What They Mean For You
--------------------------------------------
-From sai_clients.md:
-- Tests use one unified command model.
-- Client implementation translates that to Redis or Thrift RPC.
-
-For you:
-- Same logical test idea can run on different backends.
-- Example:
-  - SAIVS Thrift path
-  - SONiC Redis path
-
-From client_attrs_spec.md:
-- Attribute values are normalized into a common string format.
-
-For you:
-- This is why portability is possible.
-- Example:
-  - object list values
-  - MAC values
-  - IP values
-  - integer lists
-
-
-9) Running Tests Docs - What They Mean For You
-----------------------------------------------
-Composing testbed definition
-- This is always relevant.
-- The testbed JSON is where you choose:
-  - ASIC
-  - target
-  - SKU
-  - client type
-  - dataplane type
-  - ports
-
-Running in standalone mode
-- Very relevant for you.
-- Simplest path for API-first learning.
-- Best current practical starting point.
-
-Running in client-server mode
-- Relevant later.
-- Better when you want clearer separation of client and DUT runtime.
-- More useful for traffic-based experiments.
-- On Windows host, this is usually more fragile than API-first flow.
-
-Using SONiC device as SAI DUT
-- Relevant to your QEMU SONiC VM path.
-- Important when you want Redis + SONiC behavior.
-- Not the easiest first step, but very useful after Path B is stable.
-
-
-10) Testbed Definition - Simple Meaning
----------------------------------------
-Think of the testbed JSON as the lab wiring diagram.
-
-It answers these questions:
-- What DUT am I testing?
-- Which API backend am I using?
-- What dataplane am I using?
-- Which ports/interfaces are mapped?
-
-Simple view:
-```mermaid
-flowchart TD
-    A[Testbed JSON] --> B[NPU section]
-    A --> C[Dataplane section]
-    B --> B1[asic]
-    B --> B2[target]
-    B --> B3[sku]
-    B --> B4[client type and config]
-    C --> C1[type]
-    C --> C2[mode]
-    C --> C3[port_groups]
-```
-
-
-11) Mapping Repo Concepts To Your Real Experiments
---------------------------------------------------
-Experiment 1: Learn API CRUD
-- DUT: virtual
-- API: Thrift
-- Traffic: none
-- Mode: standalone
-- Your current proven example:
-  - test_vlan_create on saivs_thrift_standalone
-
-Experiment 2: Learn umbrella SAI-PTF behavior
-- DUT: virtual
-- API: Thrift
-- Traffic: PTF-style helper flow
-- Mode: standalone
-- Your example:
-  - FdbAttributeTest or alternate access_to_access case
-
-Experiment 3: Learn SONiC DUT behavior
-- DUT: virtual SONiC VM
-- API: Redis
-- Traffic: none initially
-- Mode: client-style control from container to VM
-- Your example:
-  - sainpu_sonic_vs testbed with QEMU SONiC VM
-
-Experiment 4: Learn dataplane forwarding later
-- DUT: virtual
-- API: Redis or Thrift
-- Traffic: PTF dataplane
-- Mode: standalone or client-server
-- Best tried later on Linux/WSL2
-
-
-12) What To Ignore For Now
---------------------------
-To avoid confusion, ignore these until later:
-- OTG/snappi advanced flow tests
-- hardware traffic generators
-- fanout switch scenarios
-- physical DUT workflows
-
-
-13) Final Simplified Answer
----------------------------
-What are we really trying on this laptop?
-
-1. API-only virtual SAI validation
-- Fastest, easiest, most reliable first step.
-
-2. Legacy SAI-PTF compatibility validation
-- Helps understand old PTF test integration.
-
-3. SONiC DUT validation in virtual form
-- Helps understand Redis-driven SONiC mode.
-
-That is enough to build strong understanding before touching physical hardware.
-
-
-14) Recommended Next Notes Structure
-------------------------------------
-Keep these docs separate:
-
-1. summary.txt
-- high-level lab journey
-
-2. summary_commands.txt
-- exact copy/paste commands and execution logs
-
-3. summary_usecases.txt
-- concept map: use-cases, architecture, applicability
-
-This separation reduces confusion.
+-------
+- List every practical virtual use case you can run on your laptop.
+- Keep only software-only paths.
+- Map each use case to status from current validation.
+
+Core Mental Model
+-----------------
+Every run is a combination of:
+1) DUT type (virtual only in this guide)
+2) SAI API backend (Thrift or Redis)
+3) Traffic style (API-only or software dataplane)
+4) Runtime mode (standalone or client-server)
+
+
+Virtual Use Cases You Asked For
+-------------------------------
+Use Case 1 - SAIVS API-only
+- DUT: SAIVS virtual switch
+- Backend: Redis/Thrift abstraction through standalone SAIVS runtime
+- Traffic: None (object CRUD only)
+- Mode: Standalone
+- Why use it: Fast confidence check for API behavior
+- Current status: PASS (validated)
+- Evidence: test_vrf.py -> 2 passed
+
+Use Case 2 - SAIVS software dataplane
+- DUT: SAIVS virtual switch
+- Backend: SAI runtime in container
+- Traffic: Software packet dataplane (L2 scenarios)
+- Mode: Standalone
+- Why use it: Best no-hardware learning path for VLAN/LAG/FDB behavior
+- Current status: PASS (validated)
+- Evidence: test_l2_basic.py -> 12 passed
+
+Use Case 3 - SONiC virtual DUT control-plane
+- DUT: SONiC VM in QEMU
+- Backend: Redis (sainpu_sonic_vs testbed)
+- Traffic: API-only
+- Mode: Client-server style (client container + SONiC VM)
+- Why use it: Learn SONiC-specific Redis behavior in virtual setup
+- Current status: PASS (validated)
+- Evidence: test_vlan_create/test_vlan_remove -> 2 passed
+
+Use Case 4 - SONiC virtual DUT dataplane
+- DUT: SONiC VM in QEMU
+- Backend: Redis
+- Traffic: Software dataplane tests from client side
+- Mode: Client-server style
+- Why use it: Try full SONiC dataplane behavior without hardware
+- Current status: EXECUTED, PROFILE-LIMITED
+- Evidence: test_l2_access_to_access_vlan failed due to missing/insufficient bridge-port list (IndexError)
+- Interpretation: this VM/profile currently lacks dataplane port assumptions required by the test
+
+
+What Is Not Included (Hardware Required)
+----------------------------------------
+- Physical switch DUT validation
+- Hardware traffic-generator workflows
+- Fanout-switch topologies with physical links
+- Any scenario requiring real front-panel cables/devices
+
+
+Recommended Order (Ubuntu WSL)
+------------------------------
+1) Use Case 1 (SAIVS API-only)
+2) Use Case 2 (SAIVS dataplane)
+3) Use Case 3 (SONiC QEMU API)
+4) Use Case 4 (SONiC QEMU dataplane, only if profile supports enough ports)
+
+Why this order
+- Fast wins first
+- Maximum learning without hardware
+- Avoid time loss on profile-dependent SONiC dataplane constraints
+
+
+Simple Comparison
+-----------------
+SAIVS path
+- Pros: fastest, stable, full software dataplane learning
+- Best for: daily no-hardware learning and repeatable labs
+
+SONiC QEMU path
+- Pros: closest to SONiC Redis architecture
+- Best for: control-plane and SONiC behavior understanding
+- Caveat: dataplane depends on image/profile port availability
+
+
+Final Answer To Your Main Question
+----------------------------------
+Can all virtual/no-hardware use cases be done on Ubuntu WSL?
+- Yes for SAIVS API and SAIVS dataplane (validated).
+- Yes for SONiC QEMU API (validated).
+- SONiC QEMU dataplane is possible in principle, but your current image/profile is port-limited for this test set.
+
+Practical rule:
+- If your goal is full virtual learning now, use SAIVS for dataplane and SONiC QEMU for Redis control-plane.

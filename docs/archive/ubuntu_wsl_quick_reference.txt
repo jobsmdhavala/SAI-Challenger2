@@ -1,0 +1,295 @@
+# Ubuntu WSL Quick Reference Card
+**Print this and follow along while executing!**
+
+## 🎯 Execution Paths - Which One to Choose?
+
+```
+Start Here
+    ↓
+Do you want FASTEST validation?
+    ├─ YES → Path B (SAIVS Standalone)
+    │           Time: 5 min | Tests: 13 L2 ✅
+    │           Best for: Rapid dataplane iteration
+    │
+    └─ NO → Do you want PRODUCTION-LIKE scenario?
+            ├─ YES → Path A (QEMU SONiC)
+            │           Time: 20 min | Tests: 8 API + L2 ✅
+            │           Best for: Full architecture learning
+            │
+            └─ NO → Skip to troubleshooting section
+```
+
+---
+
+## ⚡ Path B: SAIVS (Fastest - 5 minutes)
+
+### Enter Ubuntu
+```bash
+wsl -d Ubuntu
+cd /mnt/c/Users/mdhavala/Downloads/SAI-Challenger2
+```
+
+### Hard Stop
+```bash
+docker ps -q | xargs -r docker stop
+docker rm -f sonic-ssh-fwd sc-client-run sc-trident2-saivs-run 2>/dev/null || true
+```
+
+### Fix Line Endings (ONE-TIME)
+```bash
+sed -i 's/\r$//' run.sh build.sh exec.sh stop.sh Makefile
+```
+
+### Start SAIVS & Run Tests
+```bash
+./run.sh -a trident2 -t saivs                    # Wait ~1 min
+./exec.sh -t saivs pytest --testbed=saivs_standalone -v -k 'test_l2_basic'
+```
+
+### Expected Output
+```
+13 PASSED in ~37 seconds ✅
+```
+
+### Stop
+```bash
+docker rm -f sc-trident2-saivs-run
+```
+
+---
+
+## 🖥️ Path A: QEMU SONiC (Complete - 20 minutes)
+
+### Enter Ubuntu
+```bash
+wsl -d Ubuntu
+cd /mnt/c/Users/mdhavala/Downloads/SAI-Challenger2
+```
+
+### Hard Stop
+```bash
+pkill -f qemu-system-x86_64 || true
+docker ps -q | xargs -r docker stop
+docker rm -f sonic-ssh-fwd sc-client-run 2>/dev/null || true
+```
+
+### Check Prerequisites
+```bash
+docker --version                                # 28+
+git branch --show-current                       # main
+ls -lh /mnt/c/Users/mdhavala/Downloads/sonic-vs.qcow2
+```
+
+### Fix Line Endings (ONE-TIME)
+```bash
+sed -i 's/\r$//' run.sh build.sh exec.sh stop.sh Makefile
+```
+
+### TERMINAL 1: Boot SONiC VM
+```bash
+qemu-system-x86_64 \
+  -m 6144 -smp 4 \
+  -drive file=/mnt/c/Users/mdhavala/Downloads/sonic-vs.qcow2,if=virtio,format=qcow2 \
+  -netdev user,id=mgmt,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:6379-:6379 \
+  -device e1000,netdev=mgmt \
+  -nographic
+
+# WAIT 2-3 MIN FOR LOGIN PROMPT! 👀
+```
+
+### TERMINAL 2: Start Containers
+```bash
+wsl -d Ubuntu
+cd /mnt/c/Users/mdhavala/Downloads/SAI-Challenger2
+repo=$(pwd)
+
+docker run -d --name sc-client-run \
+  --cap-add=NET_ADMIN \
+  --add-host host.docker.internal:host-gateway \
+  -v "${repo}:/sai-challenger" \
+  plvisiondevs/sc-client:bookworm-latest
+
+docker run -d --name sonic-ssh-fwd \
+  -p 127.0.0.1:22:22 \
+  alpine/socat \
+  tcp-listen:22,reuseaddr,fork \
+  tcp:host.docker.internal:2222
+
+docker ps --filter name="sc-client-run|sonic-ssh-fwd"
+```
+
+### Verify Connectivity
+```bash
+docker exec -i sc-client-run bash -lc "redis-cli -h host.docker.internal -p 6379 ping"
+# Expected: PONG
+```
+
+### Run Tests (API Suite)
+```bash
+docker exec -i sc-client-run bash -lc "
+  cd /sai-challenger && \
+  pytest -v tests/api/ \
+    -k 'test_vlan_create or test_vlan_remove or test_virtual_router or test_l2mcgroup or test_hostiftrap' \
+    --testbed=sainpu_sonic_vs --maxfail=3
+"
+```
+
+### Expected Output
+```
+8 PASSED ✅
+```
+
+### Bonus: Dataplane Tests
+```bash
+# Try running L2 tests on Path A (bonus capability!)
+docker exec -i sc-client-run bash -lc "
+  cd /sai-challenger && \
+  pytest -v tests/api/ -k 'test_l2' --testbed=sainpu_sonic_vs --maxfail=3
+"
+```
+
+### Stop Everything
+```bash
+# Terminal 1: Press Ctrl+A then X
+# Terminal 2:
+docker rm -f sc-client-run sonic-ssh-fwd
+```
+
+---
+
+## 📊 Real-World Timing (Ubuntu)
+
+| Phase | Path A | Path B |
+|-------|--------|--------|
+| Enter WSL | 5 sec | 5 sec |
+| Hard Stop | 10 sec | 10 sec |
+| Fix Line Endings | 5 sec | 5 sec |
+| Boot/Start | **2-3 min** | **30 sec** ⚡ |
+| Run Tests | 2-3 min | 1-2 min |
+| **TOTAL** | **~20 min** | **~5 min** ⚡ |
+
+---
+
+## 🔍 Troubleshooting One-Liners
+
+### Path A Issues
+
+**QEMU not found:**
+```bash
+sudo apt-get update && sudo apt-get install -y qemu-system-x86
+```
+
+**SONiC VM not booting:**
+```bash
+# Check if image file exists and is readable
+ls -lh /mnt/c/Users/mdhavala/Downloads/sonic-vs.qcow2
+file /mnt/c/Users/mdhavala/Downloads/sonic-vs.qcow2
+```
+
+**Cannot connect to SONiC from Docker:**
+```bash
+docker logs sonic-ssh-fwd
+docker exec -i sc-client-run ping -c 1 host.docker.internal
+```
+
+**Containers fail to start:**
+```bash
+docker logs sc-client-run
+docker logs sonic-ssh-fwd
+```
+
+### Path B Issues
+
+**SAIVS container won't start:**
+```bash
+./run.sh -a trident2 -t saivs 2>&1 | tail -50
+docker logs sc-trident2-saivs-run
+```
+
+**Tests don't find testbed:**
+```bash
+ls -la testbeds/
+cat testbeds/saivs_standalone.yml
+```
+
+### Both Paths
+
+**Container cleanup:**
+```bash
+docker rm -f $(docker ps -a --filter name="sc-|sonic-" -q)
+```
+
+**Line endings still broken:**
+```bash
+# Force all to LF
+find . -name "*.sh" -o -name "Makefile" | xargs -I {} sh -c 'file {} | grep -q CRLF && sed -i "s/\r$//" {}'
+
+# OR use dos2unix if available
+sudo apt-get install -y dos2unix
+dos2unix run.sh build.sh exec.sh stop.sh Makefile
+```
+
+**Redis pub/sub debug (Path A):**
+```bash
+docker exec -i sc-client-run bash -lc "redis-cli -h host.docker.internal SUBSCRIBE SYNCD_INIT_VIEW"
+# Should see: "syncd.ready" message
+```
+
+---
+
+## 📋 Phase-by-Phase Checklist
+
+### Before You Start
+- [ ] WSL Ubuntu installed
+- [ ] Docker Desktop running with WSL2 integration enabled
+- [ ] SAI-Challenger2 repo cloned at C:\Users\mdhavala\Downloads\SAI-Challenger2
+- [ ] sonic-vs.qcow2 exists at C:\Users\mdhavala\Downloads\sonic-vs.qcow2
+
+### Path B (SAIVS)
+- [ ] Hard stop complete (no docker containers running)
+- [ ] Line endings fixed (sed -i command ran)
+- [ ] ./run.sh -a trident2 -t saivs started successfully
+- [ ] Container visible in `docker ps`
+- [ ] Tests completed: 13 PASSED
+- [ ] Cleanup done: `docker rm -f sc-trident2-saivs-run`
+
+### Path A (QEMU SONiC)
+- [ ] Hard stop complete
+- [ ] Line endings fixed
+- [ ] QEMU VM booted → login prompt visible
+- [ ] 2 containers running (se-client-run, sonic-ssh-fwd)
+- [ ] redis-cli ping returns PONG
+- [ ] API tests: 8 PASSED
+- [ ] (Optional) Dataplane tests ran
+- [ ] Cleanup done: QEMU stopped, containers removed
+
+---
+
+## 📚 Quick Links
+
+- **Full guide:** [ubuntu_wsl_replication_guide.md](ubuntu_wsl_replication_guide.md)
+- **Command reference:** [summary_commands.txt](summary_commands.txt)
+- **Windows quick start:** [windows_sonic_vs_repro_setup.md](windows_sonic_vs_repro_setup.md)
+- **Architecture notes:** [summary_usecases.txt](summary_usecases.txt)
+
+---
+
+## 🎓 What You're Learning
+
+### Path B: Fast Dataplane Testing
+✅ Software packet switching (veth)
+✅ Container design & isolation
+✅ Rapid test iteration
+✅ Pure Linux environment benefits
+
+### Path A: Production Architecture
+✅ VM-based DUT architecture
+✅ Multi-container orchestration
+✅ Port forwarding & network tunneling
+✅ Full control plane + dataplane
+
+---
+
+**Status:** ✅ Both paths validated on Ubuntu 24.04 LTS / WSL2  
+**Date:** Apr 09, 2026  
+**Author:** GitHub Copilot

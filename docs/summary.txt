@@ -1,223 +1,66 @@
-SAI-Challenger2 Fresh Start Summary
-===================================
+SAI-Challenger Ubuntu WSL Clean Summary
+=======================================
 
 Purpose
-- This file is a clean-slate guide.
-- It contains only the current recommended learning flow.
-- It intentionally excludes old run history and old checkpoints.
+- One clean Ubuntu WSL reference for virtual testing only.
+- No hardware assumptions.
+- Focus on validated use cases and real outcomes.
 
-Workspace
+Environment Baseline
+- Host OS: Windows
+- Execution OS: Ubuntu on WSL2
 - Repo: C:\Users\mdhavala\Downloads\SAI-Challenger2
-- Date baseline: 2026-04-09
+- Date: 2026-04-09
 
-Learning Goal
-- Master one reliable virtual test path for Windows:
-1. **Path A (RECOMMENDED): QEMU SONiC DUT mode with Redis** ← START HERE
-2. Path B1/B2: SAIVS local (advanced, for Linux/WSL2 only)
+What You Can Test Without Hardware
+----------------------------------
+1) Virtual API testing on SAIVS (standalone container)
+2) Virtual dataplane testing on SAIVS (L2, VLAN, LAG, FDB)
+3) Virtual SONiC control-plane testing via QEMU + Redis
+4) Virtual SONiC dataplane testing via QEMU (depends on available front-panel ports in the image/profile)
 
-Ubuntu/Linux Goal (Additional)
-- If you are on Ubuntu/Linux, both flows are valid:
-1. Path B1/B2 (SAIVS local container) - usually stable on Linux
-2. Path A (QEMU SONiC + client container) - also valid
-- Recommended Linux order:
-1. Start with Path B1 for fast API sanity
-2. Then Path B2 for legacy SAI-PTF behavior
-3. Use Path A when you want SONiC-specific DUT behavior
+Validated Outcomes From This Session
+------------------------------------
+1) SAIVS API-only: PASS
+- Test: test_vrf.py
+- Result: 2 passed
 
-Why Path A First
-- **Windows-tested**: Official setup guide exists for Windows (`windows_sonic_vs_repro_setup.md`)
-- **Stable**: No veth/dataplane issues on Windows
-- **Cleaner architecture**: QEMU VM + Docker client via port forwarding
-- **Real-world**: Uses actual SONiC OS, not lightweight SAIVS emulator
+2) SAIVS dataplane (L2 basic): PASS
+- Test: test_l2_basic.py on saivs_standalone
+- Result: 12 passed
 
-Why Avoid Path B On Windows
-- Path B1/B2 require SAIVS containers with veth network interfaces
-- Veth setup is problematic on Windows/WSL2 and causes dataplane failures
-- FdbAttributeTest and other dataplane tests will hang/fail
-- These paths work better on Linux native environments only
+3) SONiC QEMU + Redis API: PASS
+- Tests: test_vlan_create + test_vlan_remove on sainpu_sonic_vs
+- Result: 2 passed
 
-Prerequisites Checklist
-- Docker Desktop running (Linux containers mode)
-- Git, Python, QEMU installed
-- SONiC image present at C:\Users\mdhavala\Downloads\sonic-vs.qcow2
-- Submodules initialized
+4) SONiC QEMU dataplane: EXECUTED, BLOCKED BY PROFILE LIMIT
+- Test: test_l2_access_to_access_vlan on sainpu_sonic_vs
+- Result: failed with IndexError on missing/insufficient bridge-port list for dataplane member operations
+- Meaning: setup is up, but this SONiC profile does not expose enough dataplane ports for this test path
 
-Path Selection Rule
-- Do one path at a time.
-- Do not mix Path A and Path B in the same attempt.
+Bottom Line
+-----------
+- Yes, Ubuntu WSL is enough for end-to-end virtual SAI learning.
+- For reliable no-hardware work, SAIVS path is the most stable (API + dataplane both passing).
+- QEMU SONiC path is valid and useful for Redis/SONiC behavior, but dataplane pass/fail depends on image port profile.
 
-Action Items (Step-by-Step)
----------------------------
-1. Hard stop all running lab components (Phase 1).
-2. Verify prerequisites and repo state (Phase 2).
-3. Boot QEMU SONiC VM in Terminal 1.
-4. Start Docker client + SSH forwarder in Terminal 2.
-5. Verify connectivity from client to SONiC VM.
-6. Execute first test using sainpu_sonic_vs testbed.
-7. Record results using the learning log format below.
+Recommended Learning Order (Ubuntu WSL)
+----------------------------------------
+1) SAIVS API-only (fast sanity)
+2) SAIVS dataplane (main learning path)
+3) QEMU SONiC API (Redis control-plane learning)
+4) QEMU SONiC dataplane only if image has enough front-panel ports
 
-⚠️ DEPRECATED: Path B1/B2 commands are in summary_commands.txt but marked as LINUX-ONLY
+How To Use This Summary
+-----------------------
+- Use summary_commands.txt for exact execution commands.
+- Use summary_usecases.txt for concept-level explanation of each virtual path.
 
-Learning Log Format (Use after each command)
----------------------------------------------
-- Objective:
-- Command:
-- Result: PASS or FAIL
-- What happened:
-- Why it happened:
-- Next action:
-
-Expected Outcomes
------------------
-- You can run one API test end-to-end in virtual mode.
-- You can run at least one SAI-PTF style scenario.
-- You understand the difference between SAIVS Thrift path and SONiC DUT Redis path.
-
-Windows-Specific Notes
-----------------------
-- **sonic-ssh-fwd**: REQUIRED for Path A (SONiC VM → Docker client tunnel).
-- **Path A**: Proven stable on Windows (see windows_sonic_vs_repro_setup.md).
-- **Testbed file**: Use `sainpu_sonic_vs.json` for SONiC DUT tests.
-- **Port forwarding**: Must configure QEMU with `-netdev user` and `-hostfwd` for Redis/SSH.
-- **This is the official Windows recommended setup** - documented as standard practice.
-
-Ubuntu/Linux Notes
-------------------
-- Path B1/B2 are generally reliable on Ubuntu/Linux due to native veth support.
-- If using Path B1 (thrift standalone), use testbed `saivs_thrift_standalone`.
-- If using Path B2 (legacy SAI-PTF umbrella), run from `tests/` with the same testbed.
-- If using Path A on Linux, use the same SONiC QEMU flow and testbed `sainpu_sonic_vs`.
-
-Reference
-- Use docs/summary_commands.txt for exact copy/paste commands.
-- Use docs/summary_usecases.txt for simple use-case and architecture understanding.
-
-
-Phase 1 Explained (What We Did and Why)
----------------------------------------
-Goal of Phase 1
-- Put the lab into a known, clean state before starting tests.
-- Remove hidden leftovers from older sessions (containers, VM processes).
-
-Why this matters
-- Old containers can keep ports busy.
-- Old VM processes can create confusing behavior.
-- A clean baseline makes failures easier to debug.
-
-What each Phase 1 command does
-1. Stop QEMU process if it exists.
-- Prevents old SONiC VM instances from interfering.
-
-2. Stop all running Docker containers.
-- Ensures no old runtime is still active.
-
-3. Remove known lab containers.
-- Clears named containers from previous attempts.
-
-4. List all containers after cleanup.
-- Confirms what is still present.
-
-Actual result from this run
-- Removed/stopped container seen in output: sc-thrift-trident2-saivs-run
-- Remaining container list now only shows:
-	- buildx_buildkit_multiarch0 (Docker helper, exited)
-
-Interpretation
-- Phase 1 is successful.
-- Lab-specific containers are no longer running.
-- Safe to continue to Phase 2 prerequisite checks.
-
-Simple flow (Phase 1)
-```mermaid
-flowchart TD
-		A[Start Phase 1] --> B[Stop QEMU if running]
-		B --> C[Stop all running containers]
-		C --> D[Remove known lab containers]
-		D --> E[List container state]
-		E --> F{Only helper leftovers?}
-		F -->|Yes| G[Phase 1 PASS]
-		F -->|No| H[Investigate remaining lab containers]
-```
-
-
-Phase 2 Explained (Prerequisite Verification)
----------------------------------------------
-Goal of Phase 2
-- Confirm that required tools, repo state, and VM image are ready before test execution.
-
-Why this matters
-- Prevents time loss due to missing tool versions or missing artifacts.
-- Confirms we are using the expected branch and initialized submodules.
-
-What we checked
-1. Toolchain versions
-- Docker
-- Docker Compose
-- Git
-- Python
-- QEMU
-
-2. Repo readiness
-- Current branch
-- Submodule status
-
-3. SONiC image presence
-- qcow2 file exists and is readable
-
-Actual result from this run
-1. Toolchain
-- Docker version 28.0.4
-- Docker Compose v2.34.0-desktop.1
-- Git 2.49.0.windows.1
-- Python 3.8.0
-- QEMU 10.2.0
-
-2. Repo
-- Branch: main
-- Submodules present:
-	- ptf
-	- usecases/sai-ptf/SAI
-
-3. SONiC image
-- Exists: True
-- Path: C:\Users\mdhavala\Downloads\sonic-vs.qcow2
-- Size: 6926696448 bytes
-
-Interpretation
-- Phase 2 is successful.
-- Environment is ready to start Path B1 (SAIVS Thrift API first).
-
-Simple flow (Phase 2)
-```mermaid
-flowchart TD
-		A[Start Phase 2] --> B[Check tool versions]
-		B --> C[Check branch and submodules]
-		C --> D[Check SONiC image file]
-		D --> E{All checks pass?}
-		E -->|Yes| F[Proceed to Phase 3 Path B1]
-		E -->|No| G[Fix missing prerequisite first]
-```
-
-
-	Phase 3 Explained (Path B1: SAIVS Thrift API First)
-	----------------------------------------------------
-	Goal of Phase 3
-	- Start a clean SAIVS Thrift runtime container.
-	- Confirm base API path works by running one VLAN create sanity test.
-
-	Why this matters
-	- This is the fastest way to prove your test framework path is healthy.
-	- A passing VLAN API test means object create/get/remove flow is functional.
-
-	What we did
-	1. Removed any old thrift runtime container name.
-	2. Started a fresh container: sc-thrift-trident2-saivs-run.
-	3. Applied safety check for trident2 placeholder behavior.
-	4. Ran tests/api/test_vlan.py with testbed saivs_thrift_standalone.
-
-	Actual result from this run
-	1. Container started successfully.
-	2. trident2 path confirmed as symlink to BCM56850.
+Decision Rule
+-------------
+- Need guaranteed progress in 2 hours: stay on SAIVS path.
+- Need SONiC Redis behavior understanding: run QEMU SONiC API tests.
+- Need QEMU dataplane: verify port profile first; otherwise keep dataplane on SAIVS.
 	3. Test result:
 	- tests/api/test_vlan.py::TestSaiVlan::test_vlan_create PASSED
 	- Summary: 1 passed, 1 deselected
