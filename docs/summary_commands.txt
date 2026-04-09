@@ -1,0 +1,312 @@
+SAI-Challenger2 Windows Setup Commands (Updated Apr 09, 2026)
+========================================================
+
+Repo: C:\Users\mdhavala\Downloads\SAI-Challenger2
+
+⭐ IMPORTANT: Windows-Specific Recommendation
+----------------------------------------------
+For Windows laptops, follow this order:
+1. Phase 0: Enter repo
+2. Phase 1: Hard stop (cleanup)
+3. Phase 2: Verify prerequisites
+4. Phase 3: QEMU SONiC + Docker Client (Path A - ✅ RECOMMENDED)
+5. Phase 4: SKIP Path B1/B2 (❌ veth issues on Windows - Linux-only)
+
+Refer to official guide: windows_sonic_vs_repro_setup.md
+
+If you need Path B scenarios, use Linux or WSL2 native environment.
+
+
+Phase 0 - Enter Repo
+--------------------
+cd C:\Users\mdhavala\Downloads\SAI-Challenger2
+
+
+Phase 1 - Hard Stop (Clean Slate)
+---------------------------------
+# Stop QEMU if running
+Get-Process qemu-system-x86_64 -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+# Stop all running containers
+docker ps -q | ForEach-Object { docker stop $_ | Out-Null }
+
+# Remove lab containers
+docker rm -f sonic-ssh-fwd sc-client-run sc-thrift-trident2-saivs-run sc-server-trident2-saivs-run 2>$null
+
+# Show container state
+docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+Expected result: No active lab containers, only buildx_buildkit_multiarch0 (Docker helper)
+
+
+Phase 2 - Prerequisite Verification
+-----------------------------------
+docker --version
+docker compose version
+git --version
+python --version
+& "C:\Program Files\qemu\qemu-system-x86_64.exe" --version
+
+git branch --show-current
+git submodule status
+
+Test-Path "C:\Users\mdhavala\Downloads\sonic-vs.qcow2"
+Get-Item "C:\Users\mdhavala\Downloads\sonic-vs.qcow2" | Select-Object FullName,Length,LastWriteTime
+
+Expected results:
+- Docker version 28+, Python 3.8+, QEMU 10+
+- Branch: main
+- Submodules: ptf and usecases/sai-ptf/SAI present
+- SONiC image file exists
+
+
+Phase 3 - Path A: QEMU SONiC DUT + Docker Client (✅ WINDOWS RECOMMENDED)
+=========================================================================
+This is the officially recommended setup for Windows.
+Reference: windows_sonic_vs_repro_setup.md
+
+TERMINAL 1: Start SONiC VM (keep running in background)
+-------------------------------------------------------
+& "C:\Program Files\qemu\qemu-system-x86_64.exe" `
+  -m 6144 -smp 4 `
+  -drive file="C:\Users\mdhavala\Downloads\sonic-vs.qcow2",if=virtio,format=qcow2 `
+  -netdev user,id=mgmt,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:6379-:6379 `
+  -device e1000,netdev=mgmt `
+  -nographic
+
+Wait 2-3 minutes for SONiC to boot. You'll see login prompt when ready.
+
+
+TERMINAL 2: Start Docker client + SSH forwarder
+------------------------------------------------
+$repo = (Get-Location).Path
+
+# Step 3.1 - Start SAI-Challenger client container
+docker run -d --name sc-client-run `
+  --cap-add=NET_ADMIN `
+  --add-host host.docker.internal:host-gateway `
+  -v "${repo}:/sai-challenger" `
+  plvisiondevs/sc-client:bookworm-latest
+
+# Step 3.2 - Start SSH forwarder (forwards port 22 -> VM port 2222)
+docker run -d --name sonic-ssh-fwd `
+  -p 127.0.0.1:22:22 `
+  alpine/socat `
+  tcp-listen:22,reuseaddr,fork `
+  tcp:host.docker.internal:2222
+
+# Step 3.3 - Verify containers started
+docker ps --filter name="sc-client-run|sonic-ssh-fwd" --format "table {{.Names}}\t{{.Status}}"
+
+Expected: Both containers should show "Up X seconds"
+
+# Step 3.4 - Test connectivity from client to SONiC VM
+docker exec -i sc-client-run bash -lc "apt-get update >/dev/null 2>&1; apt-get install -y netcat-openbsd >/dev/null 2>&1 || true; nc -vz host.docker.internal 22; nc -vz host.docker.internal 6379"
+
+Expected: Two successful connections (port 22 and 6379 reachable)
+
+# Step 3.5 - Run first test: VLAN creation (API-only)
+docker exec -i sc-client-run bash -lc "cd /sai-challenger && pytest -v tests/api/test_vlan.py -k test_vlan_create --testbed=sainpu_sonic_vs"
+
+Expected result: ✅ PASSED
+
+# Step 3.6 - Run dataplane test: L2 access-to-access forwarding
+docker exec -i sc-client-run bash -lc "cd /sai-challenger && pytest tests/test_l2_basic.py::test_l2_access_to_access_vlan --testbed=sainpu_sonic_vs -v"
+
+Expected result: ✅ PASSED (includes packet send/receive)
+
+Phase 3 - Why This Works on Windows
+-----------------------------------
+✅ QEMU VM handles veth interfaces internally (no WSL2 limitations)
+✅ Port forwarding via NetDev user mode (stable, no veth issues)
+✅ Clear client-server separation (client=test runner, server=DUT)
+✅ Proven in windows_sonic_vs_repro_setup.md
+✅ Full dataplane support (packet send/receive works)
+
+
+Phase 4 - Path B1/B2 (❌ DEPRECATED FOR WINDOWS - REFERENCE ONLY)
+==================================================================
+
+⚠️ DO NOT USE ON WINDOWS
+
+These paths have fundamental issues on Windows:
+- Require veth network interfaces
+- Veth setup fails on WSL2
+- Dataplane tests hang or fail
+- FdbAttributeTest will NOT work
+- Only viable on Linux native environments
+
+Path B1 (SAIVS Thrift standalone):
+- Linux-only: Requires /dev/net/tun and proper veth setup
+- Not recommended even on Linux - better to use Path A
+
+Path B2 (SAIVS with legacy SAI-PTF):
+- Linux-only: Attempts to create dataplane via veth
+- FdbAttributeTest will hang indefinitely on Windows
+- Cannot be used for full testing
+
+These commands are provided for documentation/Linux reference only:
+# NOT FOR WINDOWS - Example Linux command structure:
+# docker run -d --name sc-thrift-trident2-saivs-run --cap-add=NET_ADMIN --device /dev/net/tun:/dev/net/tun -v "${repo}:/sai-challenger" plvisiondevs/sc-thrift-trident2-saivs:bookworm-latest
+# docker exec -i sc-thrift-trident2-saivs-run bash -lc "cd /sai-challenger && pytest --testbed=saivs_thrift_standalone tests/api/test_vlan.py -k test_vlan_create -v"
+
+⚠️ THESE WILL HANG/FAIL ON WINDOWS - Use Phase 3 (Path A) instead
+
+
+Phase 4A - Ubuntu/Linux Recommended Flow
+----------------------------------------
+Use this section when you are running on Ubuntu/Linux (native or stable VM).
+
+Path B1 - SAIVS thrift standalone
+```bash
+cd /path/to/SAI-Challenger2
+
+./build.sh -a trident2 -t saivs
+./run.sh -a trident2 -t saivs
+
+./exec.sh -t saivs pytest --testbed=saivs_standalone -v -k "test_l2_basic"
+```
+
+Path B2 - legacy SAI-PTF umbrella (Linux)
+```bash
+cd /path/to/SAI-Challenger2/tests
+
+pytest --testbed=saivs_thrift_standalone ../usecases/sai-ptf/SAI/ptf/saifdb.py -k FdbAttributeTest -v
+```
+
+Optional Path A on Linux (SONiC VM + client)
+- Same model as Windows Path A, but Linux networking is usually simpler.
+- Use testbed `sainpu_sonic_vs` for SONiC Redis path.
+
+Linux sanity checks
+```bash
+docker ps
+ip link | grep -E "veth|eth"
+pytest --version
+```
+
+
+Phase 5 - Cleanup and Wrap-Up
+-----------------------------
+When finished with testing:
+
+TERMINAL 1: Stop SONiC VM
+- Press Ctrl+C to gracefully shut down QEMU
+- Wait for clean exit
+
+TERMINAL 2: Cleanup Docker containers
+docker rm -f sonic-ssh-fwd sc-client-run 2>$null
+
+Verify cleanup complete:
+docker ps -a --format "table {{.Names}}\t{{.Status}}"
+
+Expected result:
+- No sc-client-run, sonic-ssh-fwd, or sc-*-saivs containers
+- Only buildx_buildkit_multiarch0 (Docker build helper - OK to ignore)
+
+Backup (Optional): Save SONiC qcow2 to safe location if modifications made
+
+
+TROUBLESHOOTING QUICK REFERENCE
+================================
+
+If Phase 3 tests FAIL:
+
+1️⃣ SONiC VM not booting?
+   - Verify QEMU window shows startup messages
+   - Wait 2-3 minutes - syncd/database need time to initialize
+   - Check QEMU process running: Get-Process qemu-system-x86_64
+
+2️⃣ Docker containers not starting?
+   - Check logs: docker logs sc-client-run and docker logs sonic-ssh-fwd
+   - Verify Docker daemon running: docker ps
+   - Try restart: docker restart sc-client-run sonic-ssh-fwd
+
+3️⃣ Connectivity tests fail (nc -vz)?
+   - Verify SONiC VM is fully booted (wait another minute)
+   - Check QEMU forwarding: netstat -an | grep 6379
+   - Verify SSH forwarder: docker logs sonic-ssh-fwd
+
+4️⃣ Pytest tests hang or timeout?
+   - This usually means veth dataplane issues (Path B)
+   - You should be using Phase 3 (Path A)
+   - Check testbed file: ensure using sainpu_sonic_vs.json (not saivs_*)
+
+5️⃣ FdbAttributeTest fails/hangs?
+   - Expected to fail on Path B (veth issues)
+   - Use Phase 3 (Path A) instead - FdbAttributeTest works there
+   - Ensure using --testbed=sainpu_sonic_vs
+
+6️⃣ "Connection refused" for Redis/SSH?
+   - Network isolation issue
+   - Restart containers: docker restart sonic-ssh-fwd sc-client-run
+   - Restart SONiC VM and wait 2-3 minutes
+   - Check host firewall isn't blocking loopback ports
+
+
+DAILY REUSE COMMANDS
+====================
+
+After rebooting, typical usage:
+
+1. Start SONiC VM (Terminal 1):
+   & "C:\Program Files\qemu\qemu-system-x86_64.exe" `
+     -m 6144 -smp 4 `
+     -drive file="C:\Users\mdhavala\Downloads\sonic-vs.qcow2",if=virtio,format=qcow2 `
+     -netdev user,id=mgmt,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=tcp:127.0.0.1:6379-:6379 `
+     -device e1000,netdev=mgmt `
+     -nographic
+
+2. Start containers (Terminal 2):
+   docker start sc-client-run sonic-ssh-fwd
+   (if they already exist; use Phase 3 steps if first time)
+
+3. Wait 2-3 minutes for SONiC to boot
+
+4. Run tests:
+   docker exec -i sc-client-run bash -lc "cd /sai-challenger && pytest tests/api/test_vlan.py -k test_vlan_create --testbed=sainpu_sonic_vs -v"
+
+5. Cleanup:
+   docker rm -f sonic-ssh-fwd sc-client-run 2>$null
+   (Ctrl+C to stop QEMU in Terminal 1)
+
+
+KEY LESSONS LEARNED (Apr 09, 2026)
+===================================
+
+❌ MISTAKE: Attempted Path B1/B2 (SAIVS container setup)
+❌ RESULT: FdbAttributeTest hung, dataplane tests failed
+✅ SOLUTION: Switched to Path A (QEMU SONiC VM per windows_sonic_vs_repro_setup.md)
+✅ OUTCOME: All tests pass including dataplane scenarios
+
+ROOT CAUSE ANALYSIS:
+- Path B uses local container networking with veth interfaces
+- Veth setup is fragile on Windows/WSL2
+- Path A isolates DUT in separate VM (no WSL2 networking limitations)
+- Windows-specific guide exists for this reason
+
+TAKEAWAY:
+Always refer to platform-specific guides before attempting setup.
+Windows has unique constraints (WSL2 networking, veth limitations) that affect path selection.
+Never debug a failing path without checking OS-specific documentation first.
+
+
+FINAL SUMMARY - WINDOWS RECOMMENDED PATH
+===========================================
+
+✅ USE: Phase 3 (Path A) - QEMU SONiC VM + Docker Client
+   - Stable on Windows
+   - Full dataplane support (FdbAttributeTest, L2 tests work)
+   - Official Windows setup (windows_sonic_vs_repro_setup.md)
+   - Proven working
+
+❌ AVOID: Phase 4 (Path B1/B2) - Local SAIVS Containers
+   - Veth setup fails on Windows/WSL2
+   - Dataplane tests hang
+   - FdbAttributeTest incompatible
+   - Linux-native only
+
+Reference documents:
+- windows_sonic_vs_repro_setup.md (official Windows guide)
+- summary.txt (learning goals and structure)
+- summary_usecases.txt (architecture and use cases)

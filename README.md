@@ -55,3 +55,11 @@ For more information on how to port SAI Challenger to new platform, please refer
 
 For more information on how SAI Challenger operates on SAI, please refer to [SAI operation](docs/sai_operation.md) document.
 
+## Lab Summary Notes
+
+For practical Windows and Ubuntu learning notes created during setup/debug sessions, see:
+
+- [High-level learning summary](docs/summary.txt)
+- [Step-by-step command reference](docs/summary_commands.txt)
+- [Use-case and architecture summary](docs/summary_usecases.txt)
+
