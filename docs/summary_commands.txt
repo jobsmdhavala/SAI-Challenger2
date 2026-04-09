@@ -45,6 +45,85 @@ Expected:
 - No active lab containers (buildx helper may remain)
 
 
+Phase 1A - Container Inventory (What Those Names Mean)
+-------------------------------------------------------
+Phase 1 shows container names only for cleanup. Here is what each one is for.
+
+1) `sc-trident2-saivs-run`
+- Used by: Experiment 1 and Experiment 2
+- Role: standalone SAIVS lab container
+- What runs inside it:
+  - SAI Challenger test environment
+  - Redis service
+  - virtual switch backend (`syncd-vs` / SAIVS)
+  - pytest and PTF helpers
+- How it is built:
+  - base image: `dockerfiles/bookworm/Dockerfile`
+  - target image: `npu/broadcom/BCM56850/saivs/Dockerfile`
+- Mental model: one container contains both the virtual DUT side and the test execution environment
+
+2) `sc-thrift-trident2-saivs-run`
+- Used by: optional thrift variant of standalone SAIVS runs
+- Role: same virtual target family, but with thrift-style naming/backend selection
+- What runs inside it:
+  - similar SAIVS runtime stack as above, but selected for thrift workflow
+- How it is created:
+  - same launcher flow (`run.sh`) with thrift selected instead of default Redis path
+- Why it appears in cleanup:
+  - old thrift experiments can leave this container behind even if current Ubuntu validation used Redis-first flows
+
+3) `sc-client-run`
+- Used by: Experiment 3 and Experiment 4
+- Role: client/test runner container for SONiC VM testing
+- What runs inside it:
+  - pytest
+  - SAI Challenger Python package
+  - Redis client libraries
+  - Paramiko/SSH utilities
+  - PTF helpers
+- How it is built:
+  - Dockerfile: `dockerfiles/bookworm/Dockerfile.client`
+- Mental model: this container does not host the virtual switch; it only runs tests and connects to the SONiC VM through the testbed definition
+
+4) `sonic-ssh-fwd`
+- Used by: Experiment 3 and Experiment 4
+- Role: tiny TCP forwarder container
+- What runs inside it:
+  - `alpine/socat`
+  - port forward from local port 22 to the SONiC VM SSH port exposed on host port 2222
+- How it is built:
+  - not built from this repo
+  - started directly from the public `alpine/socat` image
+- Why it exists:
+  - gives the client container a simple SSH path into the SONiC VM
+
+5) QEMU SONiC VM
+- Used by: Experiment 3 and Experiment 4
+- Role: virtual DUT itself
+- What runs inside it:
+  - SONiC user space
+  - `syncd`
+  - Redis and switch services inside the VM image
+- Image source:
+  - `sonic-vs.qcow2`
+- Note:
+  - this is not a Docker container, but it is part of the same test infra shape for SONiC-based experiments
+
+Which experiments need which runtime pieces:
+- Experiment 1: `sc-trident2-saivs-run`
+- Experiment 2: `sc-trident2-saivs-run`
+- Experiment 3: QEMU SONiC VM + `sc-client-run` + `sonic-ssh-fwd`
+- Experiment 4: QEMU SONiC VM + `sc-client-run` + `sonic-ssh-fwd`
+
+Where to read the infra/framework details:
+- `summary_script_flow.md`: easiest high-level explanation of container roles and launcher flow
+- `dockerfiles/bookworm/Dockerfile`: base standalone/runtime image
+- `dockerfiles/bookworm/Dockerfile.client`: client-side test runner image
+- `npu/broadcom/BCM56850/saivs/Dockerfile`: target-specific SAIVS image
+- `porting_guide.md`: framework rule for how target Dockerfiles are organized
+- `client_server_mode.md`: general client/server model for split container setups
+
+
 Phase 2 - One-Time Script Normalization (CRLF -> LF)
 -----------------------------------------------------
 cd /mnt/c/Users/mdhavala/Downloads/SAI-Challenger2

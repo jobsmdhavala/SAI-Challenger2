@@ -189,6 +189,23 @@ container   = sc-trident2-saivs-run
 
 ---
 
+## Container Quick-Reference Table
+
+| Container name | Built from | What runs inside | Used by |
+|---|---|---|---|
+| `sc-trident2-saivs-run` | `dockerfiles/bookworm/Dockerfile` (base) + `npu/broadcom/BCM56850/saivs/Dockerfile` (target) | Redis · `syncd-vs` (virtual switch) · SAI Challenger test env · pytest · PTF helpers | Experiments 1 and 2 |
+| `sc-thrift-trident2-saivs-run` | Same Dockerfiles as above; thrift SAI backend selected | Same runtime stack as above with thrift-style SAI wire | Thrift variant; left over in cleanup |
+| `sc-client-run` | `dockerfiles/bookworm/Dockerfile.client` (or pulled as `plvisiondevs/sc-client:bookworm-latest`) | pytest · SAI Challenger Python pkg · Redis client libs · Paramiko/SSH · PTF helpers | Experiments 3 and 4 |
+| `sonic-ssh-fwd` | Not built from this repo — pulled as `alpine/socat` | `socat` TCP forwarder (local port 22 → SONiC VM port 2222) | Experiments 3 and 4 |
+| QEMU SONiC VM (not a container) | `sonic-vs.qcow2` disk image | Full SONiC OS · `syncd` · Redis · switch services inside VM | Experiments 3 and 4 |
+
+Key design points:
+- Experiments 1 and 2 use one container that contains both the virtual DUT side and the test execution side inside the same image.
+- Experiments 3 and 4 split these roles: the QEMU VM is the DUT, `sc-client-run` is the test runner, and `sonic-ssh-fwd` bridges SSH access.
+- `sc-client-run` does not start a virtual switch; it only drives the tests and connects to the SONiC VM via the testbed JSON.
+
+---
+
 ## What `run.sh` Does Internally
 
 ### Code Path
