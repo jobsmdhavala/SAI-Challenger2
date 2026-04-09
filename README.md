@@ -59,6 +59,7 @@ For more information on how SAI Challenger operates on SAI, please refer to [SAI
 
 For practical Windows and Ubuntu learning notes created during setup/debug sessions, see:
 
+- [Windows and Ubuntu quick setup](docs/windows_sonic_vs_repro_setup.md)
 - [High-level learning summary](docs/summary.txt)
 - [Step-by-step command reference](docs/summary_commands.txt)
 - [Use-case and architecture summary](docs/summary_usecases.txt)
