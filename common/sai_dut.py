@@ -183,6 +183,8 @@ class SaiDutSonic(SaiDut):
         r = redis.Redis(host=self.server_ip, port=self.port, db=1)
         r.flushdb()
         self.ssh.exec_command("docker start syncd")
+        self.assert_container_state("syncd", is_running=True)
+        self._assert_syncd_pubsub_ready()
 
     def _assert_redis_is_available(self, tout=45):
         start_time = time.time()
@@ -196,3 +198,21 @@ class SaiDutSonic(SaiDut):
                     time.sleep(1)
                     continue
             assert False, f"Redis server is still not available after {tout} seconds..."
+
+    def _assert_syncd_pubsub_ready(self, tout=120):
+        # Syncd container may report "running" before it subscribes to ASIC channel.
+        r = redis.Redis(host=self.server_ip, port=self.port, db=1)
+        start_time = time.time()
+        while True:
+            try:
+                numsub = r.execute_command('PUBSUB', 'NUMSUB', 'ASIC_STATE_CHANNEL', 'ASIC_STATE_CHANNEL@1')
+                if numsub[1] >= 1 or numsub[3] >= 1:
+                    return
+            except Exception:
+                pass
+
+            if time.time() - start_time < tout:
+                time.sleep(1)
+                continue
+
+            assert False, f"Syncd pubsub channel is still not ready after {tout} seconds..."
